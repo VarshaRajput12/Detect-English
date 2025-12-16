@@ -40,7 +40,7 @@ export const useSpeechRecognition = () => {
     setIsListening(true);
 
     let lastFinalTranscript = '';
-
+// =========================================================
     recognitionRef.current.onresult = (event) => {
       let interim = '';
       let final = '';

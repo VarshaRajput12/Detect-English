@@ -11,7 +11,7 @@ export async function generateFillerPhrase(userSpeechChunk, questionContext) {
 
 The interviewee just said: "${userSpeechChunk}"
 
-Generate a SHORT, natural filler phrase (10-15 words) that:
+Generate a SHORT, natural filler phrase (5-10 words) that:
 1. Acknowledges what they said specifically
 2. Shows you're actively listening
 3. Encourages them to continue speaking
