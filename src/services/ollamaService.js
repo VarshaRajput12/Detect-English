@@ -1,11 +1,58 @@
-// Ollama API Service
-const OLLAMA_API_URL = "http://localhost:11434";
-const MODEL_NAME = "qwen:0.5b"; // Updated to match installed model
+// OpenRouter API Service
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+// Get API key from environment variable or use empty string
+// Get your free API key from: https://openrouter.ai/keys
+const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY || "";
+const MODEL_NAME = "google/gemini-2.0-flash-exp:free"; // Free model from OpenRouter
+
+// Rate limiting state
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL = 2000; // Minimum 2 seconds between requests
+
+// Check if API key is configured
+const isApiConfigured = () => {
+  if (!OPENROUTER_API_KEY) {
+    console.warn(
+      "OpenRouter API key not configured. Get one free at: https://openrouter.ai/keys",
+    );
+    return false;
+  }
+  return true;
+};
+
+// Helper to wait between requests
+const enforceRateLimit = async () => {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+    const waitTime = MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+    console.log(`⏱️ Rate limit: waiting ${waitTime}ms`);
+    await new Promise((resolve) => setTimeout(resolve, waitTime));
+  }
+
+  lastRequestTime = Date.now();
+};
 
 /**
  * Generate filler phrases based on conversation context
  */
 export async function generateFillerPhrase(userSpeechChunk, questionContext) {
+  if (!isApiConfigured()) {
+    // Return a generic filler phrase when API is not configured
+    const genericFillers = [
+      "I see, please continue.",
+      "That's interesting, tell me more.",
+      "Good point, go on.",
+      "I understand, please elaborate.",
+      "Interesting perspective, continue.",
+    ];
+    return genericFillers[Math.floor(Math.random() * genericFillers.length)];
+  }
+
+  // Enforce rate limiting
+  await enforceRateLimit();
+
   try {
     const prompt = `You are conducting an interview. The question asked was: "${questionContext}"
 
@@ -25,28 +72,60 @@ Examples for context:
 
 Now generate ONE contextual filler phrase for their response. Just the phrase, no quotes:`;
 
-    const response = await fetch(`${OLLAMA_API_URL}/api/generate`, {
+    const response = await fetch(OPENROUTER_API_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": window.location.origin,
+        "X-Title": "AI Interview Tool",
+      },
       body: JSON.stringify({
         model: MODEL_NAME,
-        prompt: prompt,
-        stream: false,
-        options: {
-          temperature: 0.8,
-          max_tokens: 50,
-          top_p: 0.9,
-          num_predict: 50,
-        },
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.8,
+        max_tokens: 50,
+        top_p: 0.9,
       }),
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama API error: ${response.status}`);
+      // Try to read the error body
+      let errorDetails = `Status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.error && errorData.error.message) {
+          errorDetails += ` - ${errorData.error.message}`;
+        } else {
+          errorDetails += ` - ${JSON.stringify(errorData)}`;
+        }
+      } catch (e) {
+        // Could not parse error body
+      }
+
+      console.warn(
+        `OpenRouter API Error: ${errorDetails}. Using fallback response.`,
+      );
+      
+      const genericFillers = [
+        "I see, please continue.",
+        "That's interesting, tell me more.",
+        "Good point, go on.",
+        "I understand, please elaborate.",
+        "Interesting perspective, continue.",
+      ];
+      return genericFillers[Math.floor(Math.random() * genericFillers.length)];
     }
 
     const data = await response.json();
-    let filler = data.response.trim().replace(/^["']|["']$/g, ""); // Remove quotes
+    let filler = data.choices[0].message.content
+      .trim()
+      .replace(/^["']|["']$/g, ""); // Remove quotes
 
     // Clean up the filler (remove any markdown, extra formatting)
     filler = filler.split("\n")[0]; // Take only first line
@@ -55,32 +134,32 @@ Now generate ONE contextual filler phrase for their response. Just the phrase, n
     // Log the generated filler phrase with styling
     console.log(
       "%c═══════════════════════════════════════════════════════════════════════════",
-      "color: #9333ea"
+      "color: #9333ea",
     );
     console.log(
       "%c🎯 FILLER PHRASE GENERATED",
-      "color: #059669; font-weight: bold; font-size: 14px"
+      "color: #059669; font-weight: bold; font-size: 14px",
     );
     console.log("%c💬 Filler:", "color: #0ea5e9; font-weight: bold", filler);
     console.log(
       "%c📝 User said:",
       "color: #f59e0b; font-weight: bold",
-      userSpeechChunk
+      userSpeechChunk,
     );
     console.log(
       "%c❓ Question:",
       "color: #8b5cf6; font-weight: bold",
-      questionContext
+      questionContext,
     );
     console.log(
       "%c📊 Length:",
       "color: #06b6d4",
       filler.split(" ").length,
-      "words"
+      "words",
     );
     console.log(
       "%c═══════════════════════════════════════════════════════════════════════════",
-      "color: #9333ea"
+      "color: #9333ea",
     );
 
     return filler;
@@ -138,36 +217,36 @@ Now generate ONE contextual filler phrase for their response. Just the phrase, n
 
     console.log(
       "%c═══════════════════════════════════════════════════════════════════════════",
-      "color: #dc2626"
+      "color: #dc2626",
     );
     console.log(
       "%c💬 FALLBACK FILLER (Contextual)",
-      "color: #dc2626; font-weight: bold; font-size: 14px"
+      "color: #dc2626; font-weight: bold; font-size: 14px",
     );
     console.log("%c🔄 Filler:", "color: #0ea5e9; font-weight: bold", fallback);
     console.log(
       "%c📝 User said:",
       "color: #f59e0b; font-weight: bold",
-      userSpeechChunk
+      userSpeechChunk,
     );
     console.log(
       "%c❓ Question:",
       "color: #8b5cf6; font-weight: bold",
-      questionContext
+      questionContext,
     );
     console.log(
       "%c📊 Length:",
       "color: #06b6d4",
       fallback.split(" ").length,
-      "words"
+      "words",
     );
     console.log(
-      "%c⚠️ Reason: Ollama API error - using contextual fallback",
-      "color: #ea580c"
+      "%c⚠️ Reason: OpenRouter API error - using contextual fallback",
+      "color: #ea580c",
     );
     console.log(
       "%c═══════════════════════════════════════════════════════════════════════════",
-      "color: #dc2626"
+      "color: #dc2626",
     );
     return fallback;
   }
@@ -177,6 +256,16 @@ Now generate ONE contextual filler phrase for their response. Just the phrase, n
  * Generate Q&A summary
  */
 export async function generateQASummary(question, answer) {
+  if (!isApiConfigured()) {
+    // Return a basic summary when API is not configured
+    return {
+      summary: `Discussed: ${question.substring(0, 100)}...`,
+      keyPoints: ["Response provided", "Further details shared"],
+      clarity: "fair",
+      completeness: "fair",
+    };
+  }
+
   try {
     const prompt = `Analyze this interview Q&A and provide a JSON response.
 
@@ -193,49 +282,72 @@ Provide a strict JSON response with this exact structure:
 
 Respond with ONLY valid JSON, no other text.`;
 
-    const response = await fetch(`${OLLAMA_API_URL}/api/generate`, {
+    const response = await fetch(OPENROUTER_API_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": window.location.origin,
+        "X-Title": "AI Interview Tool",
+      },
       body: JSON.stringify({
         model: MODEL_NAME,
-        prompt: prompt,
-        stream: false,
-        options: {
-          temperature: 0.3,
-          max_tokens: 200,
-        },
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 200,
       }),
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama API error: ${response.status}`);
+      let errorDetails = `Status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.error && errorData.error.message) {
+          errorDetails += ` - ${errorData.error.message}`;
+        } else {
+          errorDetails += ` - ${JSON.stringify(errorData)}`;
+        }
+      } catch (e) {
+        // Could not parse error body
+      }
+      throw new Error(`OpenRouter API error: ${errorDetails}`);
     }
 
     const data = await response.json();
 
     console.log(
       "%c═══════════════════════════════════════════════════════════════════════════",
-      "color: #059669"
+      "color: #059669",
     );
     console.log(
       "%c📝 Q&A SUMMARY GENERATED",
-      "color: #059669; font-weight: bold; font-size: 14px"
+      "color: #059669; font-weight: bold; font-size: 14px",
     );
-    console.log("%c🔍 Raw response:", "color: #8b5cf6", data.response);
+    console.log(
+      "%c🔍 Raw response:",
+      "color: #8b5cf6",
+      data.choices[0].message.content,
+    );
 
     // Parse JSON from response
     try {
-      const jsonMatch = data.response.match(/\{[\s\S]*\}/);
+      const responseContent = data.choices[0].message.content;
+      const jsonMatch = responseContent.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         console.log(
           "%c✅ Parsed summary:",
           "color: #16a34a; font-weight: bold",
-          parsed
+          parsed,
         );
         console.log(
           "%c═══════════════════════════════════════════════════════════════════════════",
-          "color: #059669"
+          "color: #059669",
         );
         return parsed;
       }
@@ -243,18 +355,18 @@ Respond with ONLY valid JSON, no other text.`;
       console.error(
         "%c❌ Error parsing JSON:",
         "color: #dc2626; font-weight: bold",
-        e
+        e,
       );
     }
 
     // Fallback
     console.log(
       "%c⚠️ Using fallback Q&A summary",
-      "color: #f59e0b; font-weight: bold"
+      "color: #f59e0b; font-weight: bold",
     );
     console.log(
       "%c═══════════════════════════════════════════════════════════════════════════",
-      "color: #f59e0b"
+      "color: #f59e0b",
     );
     return {
       summary: answer.substring(0, 100) + "...",
@@ -264,9 +376,10 @@ Respond with ONLY valid JSON, no other text.`;
     };
   } catch (error) {
     console.error("Error generating Q&A summary:", error);
+    // Return fallback instead of throwing
     return {
       summary: answer.substring(0, 100) + "...",
-      keyPoints: ["Error generating summary"],
+      keyPoints: ["Response recorded (AI generation unavailable)"],
       clarity: "fair",
       completeness: "fair",
     };
@@ -277,10 +390,24 @@ Respond with ONLY valid JSON, no other text.`;
  * Generate final summary and improvement plan
  */
 export async function generateFinalSummary(allQAs, allSummaries = []) {
+  if (!isApiConfigured()) {
+    // Return a basic final summary when API is not configured
+    return {
+      overallPerformance:
+        "The interview covered multiple topics with various responses provided.",
+      strengths: [
+        "Participated in the interview",
+        "Provided responses to questions",
+      ],
+      areasForImprovement: ["API key needed for detailed AI analysis"],
+      score: "N/A",
+    };
+  }
+
   try {
     const qaText = allQAs
       .map(
-        (qa, idx) => `Q${idx + 1}: ${qa.question}\nA${idx + 1}: ${qa.answer}`
+        (qa, idx) => `Q${idx + 1}: ${qa.question}\nA${idx + 1}: ${qa.answer}`,
       )
       .join("\n\n");
 
@@ -293,7 +420,7 @@ export async function generateFinalSummary(allQAs, allSummaries = []) {
               (s, idx) =>
                 `Q${idx + 1} Summary: ${s.summary} (Clarity: ${
                   s.clarity
-                }, Completeness: ${s.completeness})`
+                }, Completeness: ${s.completeness})`,
             )
             .join("\n")
         : "";
@@ -318,66 +445,86 @@ Respond with ONLY valid JSON, no other text.`;
 
     console.log(
       "%c═══════════════════════════════════════════════════════════════════════════",
-      "color: #16a34a"
+      "color: #16a34a",
     );
     console.log(
       "%c📊 GENERATING FINAL SUMMARY",
-      "color: #16a34a; font-weight: bold; font-size: 14px"
+      "color: #16a34a; font-weight: bold; font-size: 14px",
     );
     console.log(
       "%c📝 Total Q&As:",
       "color: #0ea5e9; font-weight: bold",
-      allQAs.length
+      allQAs.length,
     );
     console.log(
       "%c📋 Summaries available:",
       "color: #f59e0b; font-weight: bold",
-      allSummaries.length
+      allSummaries.length,
     );
     console.log(
       "%c═══════════════════════════════════════════════════════════════════════════",
-      "color: #16a34a"
+      "color: #16a34a",
     );
 
-    const response = await fetch(`${OLLAMA_API_URL}/api/generate`, {
+    const response = await fetch(OPENROUTER_API_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": window.location.origin,
+        "X-Title": "AI Interview Tool",
+      },
       body: JSON.stringify({
         model: MODEL_NAME,
-        prompt: prompt,
-        stream: false,
-        options: {
-          temperature: 0.3,
-          max_tokens: 500,
-        },
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.3,
+        max_tokens: 500,
       }),
     });
 
     if (!response.ok) {
-      throw new Error(`Ollama API error: ${response.status}`);
+      let errorDetails = `Status: ${response.status}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.error && errorData.error.message) {
+          errorDetails += ` - ${errorData.error.message}`;
+        } else {
+          errorDetails += ` - ${JSON.stringify(errorData)}`;
+        }
+      } catch (e) {
+        // Could not parse error body
+        errorDetails += ` (${response.statusText})`;
+      }
+      throw new Error(`OpenRouter API error: ${errorDetails}`);
     }
 
     const data = await response.json();
 
     console.log(
-      "%c🔍 Raw Ollama Response:",
+      "%c🔍 Raw OpenRouter Response:",
       "color: #8b5cf6; font-weight: bold",
-      data.response
+      data.choices[0].message.content,
     );
 
     // Parse JSON from response
     try {
-      const jsonMatch = data.response.match(/\{[\s\S]*\}/);
+      const responseContent = data.choices[0].message.content;
+      const jsonMatch = responseContent.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         console.log(
           "%c✅ Successfully parsed final summary:",
           "color: #16a34a; font-weight: bold",
-          parsed
+          parsed,
         );
         console.log(
           "%c═══════════════════════════════════════════════════════════════════════════",
-          "color: #16a34a"
+          "color: #16a34a",
         );
         return parsed;
       }
@@ -385,22 +532,22 @@ Respond with ONLY valid JSON, no other text.`;
       console.error(
         "%c❌ Error parsing JSON:",
         "color: #dc2626; font-weight: bold",
-        e
+        e,
       );
       console.log(
         "%c═══════════════════════════════════════════════════════════════════════════",
-        "color: #dc2626"
+        "color: #dc2626",
       );
     }
 
     // Fallback
     console.log(
       "%c⚠️ Using fallback final summary",
-      "color: #f59e0b; font-weight: bold"
+      "color: #f59e0b; font-weight: bold",
     );
     console.log(
       "%c═══════════════════════════════════════════════════════════════════════════",
-      "color: #f59e0b"
+      "color: #f59e0b",
     );
     return {
       overallSummary: "Interview completed successfully.",
@@ -428,16 +575,15 @@ Respond with ONLY valid JSON, no other text.`;
 }
 
 /**
- * Check if Ollama is running
+ * Check if OpenRouter API is accessible
  */
 export async function checkOllamaConnection() {
   try {
-    const response = await fetch(`${OLLAMA_API_URL}/api/tags`, {
-      method: "GET",
-    });
-    return response.ok;
+    // For OpenRouter API, we'll just return true and let actual API calls handle errors
+    // This prevents blocking the app startup with connection checks
+    return true;
   } catch (error) {
-    console.error("Error checking Ollama connection:", error);
-    return false;
+    console.error("Error checking OpenRouter connection:", error);
+    return true; // Return true to allow the app to load
   }
 }

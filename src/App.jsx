@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import { 
@@ -26,6 +26,10 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [ollamaConnected, setOllamaConnected] = useState(false);
   const [ttsInitialized, setTtsInitialized] = useState(false);
+  
+  // Rate limiting for API calls
+  const lastFillerTimeRef = useRef(0);
+  const FILLER_COOLDOWN_MS = 5000; // Only generate filler every 5 seconds
   
   // Metrics
   const [metrics, setMetrics] = useState({
@@ -72,7 +76,7 @@ function App() {
       }));
 
       if (!connected) {
-        alert('⚠️ Ollama is not running! Please start Ollama with: ollama serve (then in another terminal: ollama run qwen:0.5b)');
+        console.warn('⚠️ AI service connection check failed. The app will still attempt to use the API when needed.');
       }
     };
 
@@ -102,6 +106,16 @@ function App() {
   const handleSpeechChunk = useCallback(async (chunk) => {
     if (!chunk || chunk.length < 10) return; // Ignore very short chunks
 
+    // Rate limiting: prevent too many API calls
+    const now = Date.now();
+    const timeSinceLastFiller = now - lastFillerTimeRef.current;
+    
+    if (timeSinceLastFiller < FILLER_COOLDOWN_MS) {
+      console.log(`⏱️ Rate limited: waiting ${Math.round((FILLER_COOLDOWN_MS - timeSinceLastFiller) / 1000)}s before next filler`);
+      return;
+    }
+
+    lastFillerTimeRef.current = now;
     const startTime = performance.now();
     
     try {
