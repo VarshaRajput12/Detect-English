@@ -1,27 +1,28 @@
 // Speech Recognition Hook
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from "react";
 
 export const useSpeechRecognition = () => {
   const [isListening, setIsListening] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [interimTranscript, setInterimTranscript] = useState('');
+  const [transcript, setTranscript] = useState("");
+  const [interimTranscript, setInterimTranscript] = useState("");
   const recognitionRef = useRef(null);
   const silenceTimerRef = useRef(null);
 
   // Check browser support
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
   const IS_SUPPORTED = !!SpeechRecognition;
 
   useEffect(() => {
     if (!SpeechRecognition) {
-      console.error('Speech Recognition not supported in this browser');
+      console.error("Speech Recognition not supported in this browser");
       return;
     }
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.lang = "en-US";
 
     recognitionRef.current = recognition;
 
@@ -35,17 +36,17 @@ export const useSpeechRecognition = () => {
   const startListening = (onChunk, onPause) => {
     if (!recognitionRef.current) return;
 
-    setTranscript('');
-    setInterimTranscript('');
+    setTranscript("");
+    setInterimTranscript("");
     setIsListening(true);
 
-    let lastFinalTranscript = '';
+    let lastFinalTranscript = "";
     let processedResultsCount = 0; // Track processed results to prevent duplicates
-// =========================================================
+    // =========================================================
     recognitionRef.current.onresult = (event) => {
-      let interim = '';
-      let final = '';
-      let newFinalResults = '';
+      let interim = "";
+      let final = "";
+      let newFinalResults = "";
 
       // Process all results, but only accumulate final results we haven't seen yet
       for (let i = 0; i < event.results.length; i++) {
@@ -53,7 +54,7 @@ export const useSpeechRecognition = () => {
         if (result.isFinal) {
           // Only add this result if we haven't processed it before
           if (i >= processedResultsCount) {
-            newFinalResults += result[0].transcript + ' ';
+            newFinalResults += result[0].transcript + " ";
             processedResultsCount = i + 1;
           }
         } else {
@@ -63,9 +64,9 @@ export const useSpeechRecognition = () => {
       }
 
       if (newFinalResults.trim()) {
-        lastFinalTranscript = lastFinalTranscript + ' ' + newFinalResults;
+        lastFinalTranscript = lastFinalTranscript + " " + newFinalResults;
         setTranscript(lastFinalTranscript.trim());
-        
+
         // Call onChunk with new speech
         if (onChunk && newFinalResults.trim()) {
           onChunk(newFinalResults.trim());
@@ -84,8 +85,8 @@ export const useSpeechRecognition = () => {
     };
 
     recognitionRef.current.onerror = (event) => {
-      console.error('Speech recognition error:', event.error);
-      if (event.error === 'no-speech') {
+      console.error("Speech recognition error:", event.error);
+      if (event.error === "no-speech") {
         // Restart recognition if no speech detected
         setTimeout(() => {
           if (isListening) {
@@ -103,7 +104,7 @@ export const useSpeechRecognition = () => {
           processedResultsCount = 0; // Reset counter on restart
           recognitionRef.current.start();
         } catch (e) {
-          console.error('Error restarting recognition:', e);
+          console.error("Error restarting recognition:", e);
         }
       }
     };
@@ -111,7 +112,7 @@ export const useSpeechRecognition = () => {
     try {
       recognitionRef.current.start();
     } catch (e) {
-      console.error('Error starting recognition:', e);
+      console.error("Error starting recognition:", e);
     }
   };
 
@@ -122,14 +123,14 @@ export const useSpeechRecognition = () => {
       try {
         recognitionRef.current.stop();
       } catch (e) {
-        console.error('Error stopping recognition:', e);
+        console.error("Error stopping recognition:", e);
       }
     }
   };
 
   const resetTranscript = () => {
-    setTranscript('');
-    setInterimTranscript('');
+    setTranscript("");
+    setInterimTranscript("");
   };
 
   return {
@@ -139,6 +140,6 @@ export const useSpeechRecognition = () => {
     startListening,
     stopListening,
     resetTranscript,
-    isSupported: IS_SUPPORTED
+    isSupported: IS_SUPPORTED,
   };
 };
