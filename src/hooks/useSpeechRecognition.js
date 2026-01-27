@@ -40,28 +40,35 @@ export const useSpeechRecognition = () => {
     setIsListening(true);
 
     let lastFinalTranscript = '';
+    let processedResultsCount = 0; // Track processed results to prevent duplicates
 // =========================================================
     recognitionRef.current.onresult = (event) => {
       let interim = '';
       let final = '';
+      let newFinalResults = '';
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      // Process all results, but only accumulate final results we haven't seen yet
+      for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
-          final += result[0].transcript;
+          // Only add this result if we haven't processed it before
+          if (i >= processedResultsCount) {
+            newFinalResults += result[0].transcript + ' ';
+            processedResultsCount = i + 1;
+          }
         } else {
+          // For interim results, always get the latest
           interim += result[0].transcript;
         }
       }
 
-      if (final) {
-        const newTranscript = lastFinalTranscript + ' ' + final;
-        lastFinalTranscript = newTranscript;
-        setTranscript(newTranscript.trim());
+      if (newFinalResults.trim()) {
+        lastFinalTranscript = lastFinalTranscript + ' ' + newFinalResults;
+        setTranscript(lastFinalTranscript.trim());
         
         // Call onChunk with new speech
-        if (onChunk && final.trim()) {
-          onChunk(final.trim());
+        if (onChunk && newFinalResults.trim()) {
+          onChunk(newFinalResults.trim());
         }
 
         // Reset silence timer
@@ -82,6 +89,7 @@ export const useSpeechRecognition = () => {
         // Restart recognition if no speech detected
         setTimeout(() => {
           if (isListening) {
+            processedResultsCount = 0; // Reset counter on restart
             recognitionRef.current.start();
           }
         }, 100);
@@ -92,6 +100,7 @@ export const useSpeechRecognition = () => {
       if (isListening) {
         // Restart if still in listening mode
         try {
+          processedResultsCount = 0; // Reset counter on restart
           recognitionRef.current.start();
         } catch (e) {
           console.error('Error restarting recognition:', e);
