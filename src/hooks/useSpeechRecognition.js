@@ -7,6 +7,7 @@ export const useSpeechRecognition = () => {
   const [interimTranscript, setInterimTranscript] = useState("");
   const recognitionRef = useRef(null);
   const silenceTimerRef = useRef(null);
+  const finalTranscriptRef = useRef(""); // Track accumulated final transcript
 
   // Check browser support
   const SpeechRecognition =
@@ -23,6 +24,7 @@ export const useSpeechRecognition = () => {
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
+    recognition.maxAlternatives = 1;
 
     recognitionRef.current = recognition;
 
@@ -39,59 +41,67 @@ export const useSpeechRecognition = () => {
     setTranscript("");
     setInterimTranscript("");
     setIsListening(true);
+    finalTranscriptRef.current = ""; // Reset accumulated transcript
 
-    let lastFinalTranscript = "";
-    let processedResultsCount = 0; // Track processed results to prevent duplicates
+    let processedFinalTexts = new Set(); // Track processed final texts to prevent duplicates on Android
     // =========================================================
     recognitionRef.current.onresult = (event) => {
-      let interim = "";
-      let final = "";
-      let newFinalResults = "";
+      let interimText = "";
 
-      // Process all results, but only accumulate final results we haven't seen yet
+      // Process only NEW final results by checking against our set
       for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
-        if (result.isFinal) {
-          // Only add this result if we haven't processed it before
-          if (i >= processedResultsCount) {
-            newFinalResults += result[0].transcript + " ";
-            processedResultsCount = i + 1;
+        const text = result[0].transcript.trim();
+
+        if (result.isFinal && text) {
+          // Check if we've already processed this exact text
+          if (!processedFinalTexts.has(text)) {
+            processedFinalTexts.add(text);
+
+            // Add to accumulated transcript
+            if (finalTranscriptRef.current) {
+              finalTranscriptRef.current += " " + text;
+            } else {
+              finalTranscriptRef.current = text;
+            }
+
+            // Update UI
+            setTranscript(finalTranscriptRef.current);
+
+            // Send chunk to handler
+            if (onChunk) {
+              onChunk(text);
+            }
+
+            // Reset silence timer
+            clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = setTimeout(() => {
+              if (onPause) {
+                onPause();
+              }
+            }, 1500);
           }
-        } else {
-          // For interim results, always get the latest
-          interim += result[0].transcript;
+        } else if (!result.isFinal) {
+          // This is interim - just display it
+          interimText += result[0].transcript;
         }
       }
 
-      if (newFinalResults.trim()) {
-        lastFinalTranscript = lastFinalTranscript + " " + newFinalResults;
-        setTranscript(lastFinalTranscript.trim());
-
-        // Call onChunk with new speech
-        if (onChunk && newFinalResults.trim()) {
-          onChunk(newFinalResults.trim());
-        }
-
-        // Reset silence timer
-        clearTimeout(silenceTimerRef.current);
-        silenceTimerRef.current = setTimeout(() => {
-          if (onPause) {
-            onPause();
-          }
-        }, 1500); // 1.5 second pause detection
-      }
-
-      setInterimTranscript(interim);
+      // Always update interim text display
+      setInterimTranscript(interimText);
     };
 
     recognitionRef.current.onerror = (event) => {
       console.error("Speech recognition error:", event.error);
-      if (event.error === "no-speech") {
+      if (event.error === "no-speech" || event.error === "aborted") {
         // Restart recognition if no speech detected
         setTimeout(() => {
           if (isListening) {
-            processedResultsCount = 0; // Reset counter on restart
-            recognitionRef.current.start();
+            try {
+              recognitionRef.current.start();
+            } catch (e) {
+              console.error("Error restarting after error:", e);
+            }
           }
         }, 100);
       }
@@ -101,7 +111,6 @@ export const useSpeechRecognition = () => {
       if (isListening) {
         // Restart if still in listening mode
         try {
-          processedResultsCount = 0; // Reset counter on restart
           recognitionRef.current.start();
         } catch (e) {
           console.error("Error restarting recognition:", e);
@@ -131,6 +140,7 @@ export const useSpeechRecognition = () => {
   const resetTranscript = () => {
     setTranscript("");
     setInterimTranscript("");
+    finalTranscriptRef.current = ""; // Also reset the ref
   };
 
   return {
