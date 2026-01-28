@@ -8,6 +8,9 @@ export const useSpeechRecognition = () => {
   const recognitionRef = useRef(null);
   const silenceTimerRef = useRef(null);
   const finalTranscriptRef = useRef(""); // Track accumulated final transcript
+  const processedFinalTextsRef = useRef(new Set()); // Persist across restarts to prevent duplicates
+  const onChunkCallbackRef = useRef(null); // Store callback to avoid stale closures
+  const onPauseCallbackRef = useRef(null); // Store pause callback
 
   // Check browser support
   const SpeechRecognition =
@@ -28,35 +31,19 @@ export const useSpeechRecognition = () => {
 
     recognitionRef.current = recognition;
 
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    };
-  }, [SpeechRecognition]);
-
-  const startListening = (onChunk, onPause) => {
-    if (!recognitionRef.current) return;
-
-    setTranscript("");
-    setInterimTranscript("");
-    setIsListening(true);
-    finalTranscriptRef.current = ""; // Reset accumulated transcript
-
-    let processedFinalTexts = new Set(); // Track processed final texts to prevent duplicates on Android
-    // =========================================================
-    recognitionRef.current.onresult = (event) => {
+    // Set up event handlers that will use refs (avoiding stale closures)
+    recognition.onresult = (event) => {
       let interimText = "";
 
-      // Process only NEW final results by checking against our set
+      // Process only NEW final results by checking against our persisted set
       for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
         const text = result[0].transcript.trim();
 
         if (result.isFinal && text) {
           // Check if we've already processed this exact text
-          if (!processedFinalTexts.has(text)) {
-            processedFinalTexts.add(text);
+          if (!processedFinalTextsRef.current.has(text)) {
+            processedFinalTextsRef.current.add(text);
 
             // Add to accumulated transcript
             if (finalTranscriptRef.current) {
@@ -68,16 +55,16 @@ export const useSpeechRecognition = () => {
             // Update UI
             setTranscript(finalTranscriptRef.current);
 
-            // Send chunk to handler
-            if (onChunk) {
-              onChunk(text);
+            // Send chunk to handler using the ref to get current callback
+            if (onChunkCallbackRef.current) {
+              onChunkCallbackRef.current(text);
             }
 
             // Reset silence timer
             clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = setTimeout(() => {
-              if (onPause) {
-                onPause();
+              if (onPauseCallbackRef.current) {
+                onPauseCallbackRef.current();
               }
             }, 1500);
           }
@@ -91,12 +78,12 @@ export const useSpeechRecognition = () => {
       setInterimTranscript(interimText);
     };
 
-    recognitionRef.current.onerror = (event) => {
+    recognition.onerror = (event) => {
       console.error("Speech recognition error:", event.error);
       if (event.error === "no-speech" || event.error === "aborted") {
         // Restart recognition if no speech detected
         setTimeout(() => {
-          if (isListening) {
+          if (recognitionRef.current && isListening) {
             try {
               recognitionRef.current.start();
             } catch (e) {
@@ -107,9 +94,9 @@ export const useSpeechRecognition = () => {
       }
     };
 
-    recognitionRef.current.onend = () => {
-      if (isListening) {
-        // Restart if still in listening mode
+    recognition.onend = () => {
+      // Only restart if still in listening mode
+      if (recognitionRef.current && isListening) {
         try {
           recognitionRef.current.start();
         } catch (e) {
@@ -117,6 +104,29 @@ export const useSpeechRecognition = () => {
         }
       }
     };
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+      }
+    };
+  }, [SpeechRecognition, isListening]);
+
+  const startListening = (onChunk, onPause) => {
+    if (!recognitionRef.current) return;
+
+    setTranscript("");
+    setInterimTranscript("");
+    setIsListening(true);
+    finalTranscriptRef.current = ""; // Reset accumulated transcript
+    processedFinalTextsRef.current.clear(); // Clear processed texts for new session
+
+    // Store callbacks in refs to avoid stale closures
+    onChunkCallbackRef.current = onChunk;
+    onPauseCallbackRef.current = onPause;
 
     try {
       recognitionRef.current.start();
@@ -129,6 +139,11 @@ export const useSpeechRecognition = () => {
     if (recognitionRef.current) {
       setIsListening(false);
       clearTimeout(silenceTimerRef.current);
+
+      // Clear callback refs
+      onChunkCallbackRef.current = null;
+      onPauseCallbackRef.current = null;
+
       try {
         recognitionRef.current.stop();
       } catch (e) {
@@ -141,6 +156,7 @@ export const useSpeechRecognition = () => {
     setTranscript("");
     setInterimTranscript("");
     finalTranscriptRef.current = ""; // Also reset the ref
+    processedFinalTextsRef.current.clear(); // Clear the processed texts set
   };
 
   return {
