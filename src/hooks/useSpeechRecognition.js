@@ -11,6 +11,7 @@ export const useSpeechRecognition = () => {
   const processedFinalTextsRef = useRef(new Set()); // Persist across restarts to prevent duplicates
   const onChunkCallbackRef = useRef(null); // Store callback to avoid stale closures
   const onPauseCallbackRef = useRef(null); // Store pause callback
+  const isListeningRef = useRef(false); // Track listening state for event handlers
 
   // Check browser support
   const SpeechRecognition =
@@ -83,7 +84,7 @@ export const useSpeechRecognition = () => {
       if (event.error === "no-speech" || event.error === "aborted") {
         // Restart recognition if no speech detected
         setTimeout(() => {
-          if (recognitionRef.current && isListening) {
+          if (recognitionRef.current && isListeningRef.current) {
             try {
               recognitionRef.current.start();
             } catch (e) {
@@ -96,7 +97,7 @@ export const useSpeechRecognition = () => {
 
     recognition.onend = () => {
       // Only restart if still in listening mode
-      if (recognitionRef.current && isListening) {
+      if (recognitionRef.current && isListeningRef.current) {
         try {
           recognitionRef.current.start();
         } catch (e) {
@@ -113,7 +114,7 @@ export const useSpeechRecognition = () => {
         recognitionRef.current.stop();
       }
     };
-  }, [SpeechRecognition, isListening]);
+  }, [SpeechRecognition]);
 
   const startListening = (onChunk, onPause) => {
     if (!recognitionRef.current) return;
@@ -121,6 +122,7 @@ export const useSpeechRecognition = () => {
     setTranscript("");
     setInterimTranscript("");
     setIsListening(true);
+    isListeningRef.current = true; // Update ref
     finalTranscriptRef.current = ""; // Reset accumulated transcript
     processedFinalTextsRef.current.clear(); // Clear processed texts for new session
 
@@ -138,6 +140,7 @@ export const useSpeechRecognition = () => {
   const stopListening = () => {
     if (recognitionRef.current) {
       setIsListening(false);
+      isListeningRef.current = false; // Update ref
       clearTimeout(silenceTimerRef.current);
 
       // Clear callback refs
